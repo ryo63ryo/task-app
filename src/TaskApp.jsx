@@ -54,11 +54,18 @@ const Icons = {
       <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
     </svg>
   ),
+  ChevronDown: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  ),
 };
+
+const COLORS = ['#4A90D9', '#D97B4A', '#7AD94A', '#D94A7A', '#9B4AD9', '#D94A4A', '#4AD9D9', '#D9D94A'];
 
 // 初期データ
 const getInitialData = () => {
-  const saved = localStorage.getItem('kidTaskApp');
+  const saved = localStorage.getItem('kidTaskAppV2');
   if (saved) {
     try {
       return JSON.parse(saved);
@@ -68,42 +75,56 @@ const getInitialData = () => {
   }
   
   return {
+    // タスクのマスターリスト
     tasks: [
-      { id: 1, name: 'しゅくだい', duration: 30, required: true, color: '#4A90D9' },
-      { id: 2, name: 'ピアノ', duration: 20, required: true, color: '#D97B4A' },
-      { id: 3, name: 'どくしょ', duration: 15, required: true, color: '#7AD94A' },
-      { id: 4, name: 'かたづけ', duration: 10, required: true, color: '#D94A7A' },
-      { id: 5, name: 'ゲーム', duration: 30, required: false, color: '#9B4AD9' },
-      { id: 6, name: 'YouTube', duration: 20, required: false, color: '#D94A4A' },
+      { id: 1, name: 'しゅくだい', duration: 30, color: '#4A90D9' },
+      { id: 2, name: 'ピアノ', duration: 20, color: '#D97B4A' },
+      { id: 3, name: 'どくしょ', duration: 15, color: '#7AD94A' },
+      { id: 4, name: 'かたづけ', duration: 10, color: '#D94A7A' },
+      { id: 5, name: 'ゲーム', duration: 30, color: '#9B4AD9' },
+      { id: 6, name: 'YouTube', duration: 20, color: '#D94A4A' },
     ],
-    weeklyTime: {
-      0: 60, 1: 90, 2: 90, 3: 90, 4: 90, 5: 120, 6: 120
+    // 曜日ごとの設定 (0=日曜, 1=月曜, ...)
+    weeklySchedule: {
+      0: { time: 120, required: [1, 3], optional: [5, 6] },  // 日曜
+      1: { time: 90, required: [1, 2, 3], optional: [5] },   // 月曜
+      2: { time: 90, required: [1, 3, 4], optional: [5] },   // 火曜
+      3: { time: 90, required: [1, 2, 3], optional: [5] },   // 水曜
+      4: { time: 90, required: [1, 3, 4], optional: [5] },   // 木曜
+      5: { time: 120, required: [1, 2], optional: [5, 6] },  // 金曜
+      6: { time: 120, required: [1, 3], optional: [5, 6] },  // 土曜
     },
     history: [],
-    weekStartDate: null,
   };
 };
 
 export default function TaskApp() {
   const [data, setData] = useState(getInitialData);
-  const [view, setView] = useState('today'); // 'today', 'tasks', 'weekly', 'history'
+  const [view, setView] = useState('today');
+  const [selectedDay, setSelectedDay] = useState(null);
   const [todayCompleted, setTodayCompleted] = useState({});
   const [editingTask, setEditingTask] = useState(null);
   const [showAddTask, setShowAddTask] = useState(false);
 
   // データをlocalStorageに保存
   useEffect(() => {
-    localStorage.setItem('kidTaskApp', JSON.stringify(data));
+    localStorage.setItem('kidTaskAppV2', JSON.stringify(data));
   }, [data]);
 
   // 今日の曜日を取得
   const today = new Date();
   const dayOfWeek = today.getDay();
-  const todayTime = data.weeklyTime[dayOfWeek];
+  const todaySchedule = data.weeklySchedule[dayOfWeek];
+  const todayTime = todaySchedule.time;
 
-  // 必須タスクと余裕タスクを分ける
-  const requiredTasks = data.tasks.filter(t => t.required);
-  const optionalTasks = data.tasks.filter(t => !t.required);
+  // 今日のタスクを取得
+  const getTodayTasks = (type) => {
+    const taskIds = type === 'required' ? todaySchedule.required : todaySchedule.optional;
+    return taskIds.map(id => data.tasks.find(t => t.id === id)).filter(Boolean);
+  };
+
+  const requiredTasks = getTodayTasks('required');
+  const optionalTasks = getTodayTasks('optional');
 
   // 使った時間を計算
   const usedTime = Object.entries(todayCompleted).reduce((sum, [id, done]) => {
@@ -136,7 +157,7 @@ export default function TaskApp() {
 
       setData(prev => ({
         ...prev,
-        history: [record, ...prev.history.slice(0, 29)] // 最新30日分
+        history: [record, ...prev.history.slice(0, 29)]
       }));
     }
 
@@ -165,16 +186,29 @@ export default function TaskApp() {
   const deleteTask = (id) => {
     setData(prev => ({
       ...prev,
-      tasks: prev.tasks.filter(t => t.id !== id)
+      tasks: prev.tasks.filter(t => t.id !== id),
+      weeklySchedule: Object.fromEntries(
+        Object.entries(prev.weeklySchedule).map(([day, schedule]) => [
+          day,
+          {
+            ...schedule,
+            required: schedule.required.filter(taskId => taskId !== id),
+            optional: schedule.optional.filter(taskId => taskId !== id),
+          }
+        ])
+      )
     }));
     setEditingTask(null);
   };
 
-  // 週間時間を更新
-  const updateWeeklyTime = (day, time) => {
+  // 曜日のスケジュールを更新
+  const updateDaySchedule = (day, updates) => {
     setData(prev => ({
       ...prev,
-      weeklyTime: { ...prev.weeklyTime, [day]: time }
+      weeklySchedule: {
+        ...prev.weeklySchedule,
+        [day]: { ...prev.weeklySchedule[day], ...updates }
+      }
     }));
   };
 
@@ -199,7 +233,7 @@ export default function TaskApp() {
       }}>
         {view !== 'today' ? (
           <button
-            onClick={() => setView('today')}
+            onClick={() => { setView('today'); setSelectedDay(null); }}
             style={{
               background: 'none',
               border: 'none',
@@ -233,6 +267,7 @@ export default function TaskApp() {
                 boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
                 color: '#64748B',
               }}
+              title="タスク管理"
             >
               <Icons.Settings />
             </button>
@@ -247,6 +282,7 @@ export default function TaskApp() {
                 boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
                 color: '#64748B',
               }}
+              title="曜日設定"
             >
               <Icons.Calendar />
             </button>
@@ -261,6 +297,7 @@ export default function TaskApp() {
                 boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
                 color: '#64748B',
               }}
+              title="履歴"
             >
               <Icons.History />
             </button>
@@ -331,31 +368,33 @@ export default function TaskApp() {
           </div>
 
           {/* 必須タスク */}
-          <div style={{ marginBottom: '24px' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              marginBottom: '12px',
-              color: '#475569',
-              fontWeight: '500',
-            }}>
-              <Icons.Star />
-              かならずやること
+          {requiredTasks.length > 0 && (
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginBottom: '12px',
+                color: '#475569',
+                fontWeight: '500',
+              }}>
+                <Icons.Star />
+                かならずやること
+              </div>
+              
+              {requiredTasks.map(task => (
+                <TaskItem
+                  key={task.id}
+                  task={task}
+                  completed={todayCompleted[task.id]}
+                  onToggle={() => setTodayCompleted(prev => ({
+                    ...prev,
+                    [task.id]: !prev[task.id]
+                  }))}
+                />
+              ))}
             </div>
-            
-            {requiredTasks.map(task => (
-              <TaskItem
-                key={task.id}
-                task={task}
-                completed={todayCompleted[task.id]}
-                onToggle={() => setTodayCompleted(prev => ({
-                  ...prev,
-                  [task.id]: !prev[task.id]
-                }))}
-              />
-            ))}
-          </div>
+          )}
 
           {/* 余裕タスク */}
           {optionalTasks.length > 0 && (
@@ -387,6 +426,32 @@ export default function TaskApp() {
             </div>
           )}
 
+          {requiredTasks.length === 0 && optionalTasks.length === 0 && (
+            <div style={{
+              background: 'white',
+              borderRadius: '16px',
+              padding: '40px 20px',
+              textAlign: 'center',
+              color: '#94A3B8',
+            }}>
+              今日のタスクがありません<br />
+              <button
+                onClick={() => setView('weekly')}
+                style={{
+                  marginTop: '12px',
+                  background: '#4ADE80',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                }}
+              >
+                曜日設定を開く
+              </button>
+            </div>
+          )}
+
           {/* 保存ボタン */}
           {Object.values(todayCompleted).some(v => v) && (
             <button
@@ -410,11 +475,11 @@ export default function TaskApp() {
         </div>
       )}
 
-      {/* タスク設定画面 */}
+      {/* タスク管理画面 */}
       {view === 'tasks' && (
         <div>
           <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#1E293B', marginBottom: '20px' }}>
-            タスクのせってい
+            タスクいちらん
           </h2>
           
           {data.tasks.map(task => (
@@ -441,7 +506,7 @@ export default function TaskApp() {
                 <div>
                   <div style={{ fontWeight: '500', color: '#1E293B' }}>{task.name}</div>
                   <div style={{ fontSize: '13px', color: '#94A3B8' }}>
-                    {task.duration}分 ・ {task.required ? 'かならず' : 'よゆう'}
+                    {task.duration}分
                   </div>
                 </div>
               </div>
@@ -485,59 +550,84 @@ export default function TaskApp() {
         </div>
       )}
 
-      {/* 週間時間設定画面 */}
-      {view === 'weekly' && (
+      {/* 曜日設定画面 */}
+      {view === 'weekly' && selectedDay === null && (
         <div>
           <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#1E293B', marginBottom: '20px' }}>
-            まいにちのじかん
+            ようびごとの せってい
           </h2>
           
-          {[1, 2, 3, 4, 5, 6, 0].map(day => (
-            <div
-              key={day}
-              style={{
-                background: 'white',
-                borderRadius: '16px',
-                padding: '16px 20px',
-                marginBottom: '12px',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div style={{
-                fontWeight: '600',
-                color: day === 0 || day === 6 ? '#F97316' : '#1E293B',
-                fontSize: '16px',
-              }}>
-                {DAYS_JP[day]}ようび
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <input
-                  type="range"
-                  min="30"
-                  max="180"
-                  step="10"
-                  value={data.weeklyTime[day]}
-                  onChange={(e) => updateWeeklyTime(day, parseInt(e.target.value))}
-                  style={{
-                    width: '120px',
-                    accentColor: '#4ADE80',
-                  }}
-                />
+          {[1, 2, 3, 4, 5, 6, 0].map(day => {
+            const schedule = data.weeklySchedule[day];
+            const dayTasks = [...schedule.required, ...schedule.optional]
+              .map(id => data.tasks.find(t => t.id === id))
+              .filter(Boolean);
+            
+            return (
+              <div
+                key={day}
+                onClick={() => setSelectedDay(day)}
+                style={{
+                  background: 'white',
+                  borderRadius: '16px',
+                  padding: '16px 20px',
+                  marginBottom: '12px',
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
+                  cursor: 'pointer',
+                }}
+              >
                 <div style={{
-                  width: '60px',
-                  textAlign: 'right',
-                  fontWeight: '600',
-                  color: '#4ADE80',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '8px',
                 }}>
-                  {data.weeklyTime[day]}分
+                  <div style={{
+                    fontWeight: '600',
+                    color: day === 0 || day === 6 ? '#F97316' : '#1E293B',
+                    fontSize: '16px',
+                  }}>
+                    {DAYS_JP[day]}ようび
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: '#64748B', fontSize: '14px' }}>{schedule.time}分</span>
+                    <Icons.ChevronDown />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {dayTasks.length > 0 ? dayTasks.map(task => (
+                    <span
+                      key={task.id}
+                      style={{
+                        background: task.color + '20',
+                        color: task.color,
+                        padding: '4px 10px',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                      }}
+                    >
+                      {task.name}
+                    </span>
+                  )) : (
+                    <span style={{ color: '#94A3B8', fontSize: '13px' }}>タスクなし</span>
+                  )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+      )}
+
+      {/* 曜日詳細設定画面 */}
+      {view === 'weekly' && selectedDay !== null && (
+        <DayScheduleEditor
+          day={selectedDay}
+          schedule={data.weeklySchedule[selectedDay]}
+          tasks={data.tasks}
+          onUpdate={(updates) => updateDaySchedule(selectedDay, updates)}
+          onBack={() => setSelectedDay(null)}
+        />
       )}
 
       {/* 履歴画面 */}
@@ -632,6 +722,156 @@ export default function TaskApp() {
   );
 }
 
+// 曜日スケジュール編集コンポーネント
+function DayScheduleEditor({ day, schedule, tasks, onUpdate, onBack }) {
+  const [time, setTime] = useState(schedule.time);
+  const [required, setRequired] = useState(schedule.required);
+  const [optional, setOptional] = useState(schedule.optional);
+
+  const handleSave = () => {
+    onUpdate({ time, required, optional });
+    onBack();
+  };
+
+  const toggleTask = (taskId, type) => {
+    if (type === 'required') {
+      if (required.includes(taskId)) {
+        setRequired(required.filter(id => id !== taskId));
+      } else {
+        setRequired([...required, taskId]);
+        setOptional(optional.filter(id => id !== taskId));
+      }
+    } else {
+      if (optional.includes(taskId)) {
+        setOptional(optional.filter(id => id !== taskId));
+      } else {
+        setOptional([...optional, taskId]);
+        setRequired(required.filter(id => id !== taskId));
+      }
+    }
+  };
+
+  const getTaskStatus = (taskId) => {
+    if (required.includes(taskId)) return 'required';
+    if (optional.includes(taskId)) return 'optional';
+    return 'none';
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontSize: '20px', fontWeight: '700', color: '#1E293B', marginBottom: '20px' }}>
+        {DAYS_JP[day]}ようびの せってい
+      </h2>
+
+      {/* 時間設定 */}
+      <div style={{
+        background: 'white',
+        borderRadius: '16px',
+        padding: '20px',
+        marginBottom: '20px',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
+      }}>
+        <div style={{ marginBottom: '12px', fontWeight: '500', color: '#475569' }}>
+          つかえる時間: {time}分
+        </div>
+        <input
+          type="range"
+          min="30"
+          max="180"
+          step="10"
+          value={time}
+          onChange={(e) => setTime(parseInt(e.target.value))}
+          style={{
+            width: '100%',
+            accentColor: '#4ADE80',
+          }}
+        />
+      </div>
+
+      {/* タスク選択 */}
+      <div style={{
+        background: 'white',
+        borderRadius: '16px',
+        padding: '20px',
+        marginBottom: '20px',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
+      }}>
+        <div style={{ marginBottom: '16px', fontWeight: '500', color: '#475569' }}>
+          タスクをえらぶ
+        </div>
+        <div style={{ fontSize: '12px', color: '#94A3B8', marginBottom: '16px' }}>
+          タップで切りかえ: なし → かならず → よゆう → なし
+        </div>
+
+        {tasks.map(task => {
+          const status = getTaskStatus(task.id);
+          return (
+            <div
+              key={task.id}
+              onClick={() => {
+                if (status === 'none') toggleTask(task.id, 'required');
+                else if (status === 'required') toggleTask(task.id, 'optional');
+                else setOptional(optional.filter(id => id !== task.id));
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px',
+                marginBottom: '8px',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                background: status === 'none' ? '#F8FAFC' : 
+                           status === 'required' ? '#DCFCE7' : '#FEF3C7',
+                border: status === 'none' ? '2px solid #E2E8F0' :
+                        status === 'required' ? '2px solid #4ADE80' : '2px solid #F59E0B',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '10px',
+                  height: '10px',
+                  borderRadius: '50%',
+                  background: task.color,
+                }} />
+                <span style={{ fontWeight: '500' }}>{task.name}</span>
+                <span style={{ fontSize: '12px', color: '#94A3B8' }}>{task.duration}分</span>
+              </div>
+              <span style={{
+                fontSize: '12px',
+                fontWeight: '600',
+                color: status === 'none' ? '#94A3B8' :
+                       status === 'required' ? '#16A34A' : '#D97706',
+              }}>
+                {status === 'none' ? 'なし' : status === 'required' ? 'かならず' : 'よゆう'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 保存ボタン */}
+      <button
+        onClick={handleSave}
+        style={{
+          width: '100%',
+          padding: '16px',
+          background: 'linear-gradient(135deg, #4ADE80 0%, #22C55E 100%)',
+          color: 'white',
+          border: 'none',
+          borderRadius: '16px',
+          fontSize: '16px',
+          fontWeight: '700',
+          cursor: 'pointer',
+          boxShadow: '0 4px 15px rgba(74, 222, 128, 0.3)',
+        }}
+      >
+        ほぞんする
+      </button>
+    </div>
+  );
+}
+
 // タスクアイテムコンポーネント
 function TaskItem({ task, completed, onToggle, disabled }) {
   return (
@@ -695,14 +935,11 @@ function TaskItem({ task, completed, onToggle, disabled }) {
 function TaskModal({ task, onSave, onDelete, onClose }) {
   const [name, setName] = useState(task?.name || '');
   const [duration, setDuration] = useState(task?.duration || 15);
-  const [required, setRequired] = useState(task?.required ?? true);
   const [color, setColor] = useState(task?.color || '#4A90D9');
-
-  const colors = ['#4A90D9', '#D97B4A', '#7AD94A', '#D94A7A', '#9B4AD9', '#D94A4A', '#4AD9D9', '#D9D94A'];
 
   const handleSubmit = () => {
     if (!name.trim()) return;
-    onSave({ name, duration, required, color });
+    onSave({ name, duration, color });
   };
 
   return (
@@ -772,50 +1009,12 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
           />
         </div>
 
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', marginBottom: '12px', color: '#475569', fontWeight: '500' }}>
-            しゅるい
-          </label>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button
-              onClick={() => setRequired(true)}
-              style={{
-                flex: 1,
-                padding: '12px',
-                border: required ? '2px solid #4ADE80' : '2px solid #E2E8F0',
-                borderRadius: '12px',
-                background: required ? '#DCFCE7' : 'white',
-                cursor: 'pointer',
-                fontWeight: '500',
-                color: required ? '#16A34A' : '#64748B',
-              }}
-            >
-              かならず
-            </button>
-            <button
-              onClick={() => setRequired(false)}
-              style={{
-                flex: 1,
-                padding: '12px',
-                border: !required ? '2px solid #F59E0B' : '2px solid #E2E8F0',
-                borderRadius: '12px',
-                background: !required ? '#FEF3C7' : 'white',
-                cursor: 'pointer',
-                fontWeight: '500',
-                color: !required ? '#D97706' : '#64748B',
-              }}
-            >
-              よゆう
-            </button>
-          </div>
-        </div>
-
         <div style={{ marginBottom: '24px' }}>
           <label style={{ display: 'block', marginBottom: '12px', color: '#475569', fontWeight: '500' }}>
             いろ
           </label>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            {colors.map(c => (
+            {COLORS.map(c => (
               <button
                 key={c}
                 onClick={() => setColor(c)}
